@@ -1,0 +1,53 @@
+name: PR on MAIN - Build & Deploy Static Site
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  build_and_deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@v2
+
+      - name: Save PR ID
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          REPO_NAME=$(echo $GITHUB_REPOSITORY | cut -d'/' -f2)
+          echo "PRID=${REPO_NAME}-${{ github.event.pull_request.number }}" >> $GITHUB_ENV
+
+      - name: Build Docker image
+        run: docker build -t static-site-app .
+
+      - name: Provide doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_TOKEN }}
+
+      - name: Login to Digital Ocean Registry
+        run: doctl registry login --expiry-seconds 600
+
+      - name: save config cluster
+        run: doctl kubernetes cluster kubeconfig save --expiry-seconds 600 <YOUR_CLUSTER_NAME>
+
+      - name: Tag image
+        run: docker tag static-site-app registry.digitalocean.com/<YOUR_REGISTRY>/dev1/static-site-app:$(echo $GITHUB_SHA | head -c7)
+
+      - name: Push image to DO Container Registry
+        run: docker push registry.digitalocean.com/<YOUR_REGISTRY>/dev1/static-site-app:$(echo $GITHUB_SHA | head -c7)
+
+      - name: Update deployment file
+        run: TAG=$(echo $GITHUB_SHA | head -c7) && sed -i 's|<IMAGE>|registry.digitalocean.com/<YOUR_REGISTRY>/dev1/static-site-app:'${TAG}'|' $GITHUB_WORKSPACE/deployment/dev1/deployment.yaml
+
+      - name: Update ingress file
+        run: sed -i 's|<PRID>|'${{ env.PRID }}'|' $GITHUB_WORKSPACE/deployment/dev1/ingress.yaml
+
+      - name: Deploy
+        run: kubectl apply -f $GITHUB_WORKSPACE/deployment/dev1/
+
+      - name: Verify deploy
+        run: kubectl rollout status deployment/static-site-app
