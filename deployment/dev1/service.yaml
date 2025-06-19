@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-static-site-app
+  namespace: default
+spec:
+  selector:
+    app: static-site-app
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
